@@ -42,9 +42,9 @@ Parameters:
   DBInstanceClass:
     Description: The database instance type
     Type: String
-    Default: t2.micro
+    Default: db.t2.micro
     AllowedValues:
-      - t2.micro  
+      - db.t2.micro  
   MultiAZDatabase:
     Default: 'true'
     Description: Create a Multi-AZ MySQL Amazon RDS database instance
