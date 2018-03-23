@@ -1,0 +1,463 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  AWS CloudFormation Sample Template LAMP_Multi_AZ: Create a highly available,
+  scalable LAMP stack with an Amazon RDS database instance for the backend data
+  store. This template demonstrates using the AWS CloudFormation bootstrap
+  scripts to install the packages and files necessary to deploy the Apache web
+  server and PHP at instance launch time. **WARNING** This template creates one
+  or more Amazon EC2 instances, an Application Load Balancer and an Amazon RDS
+  DB instance. You will be billed for the AWS resources used if you create a
+  stack from this template.
+Parameters:
+  DBEndpoint:
+    Default: ''
+    Description: MySQL database endpoint
+    Type: String
+  DBUser:
+    NoEcho: 'true'
+    Description: Username for MySQL database access
+    Type: String
+    MinLength: '1'
+    MaxLength: '16'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric characters.
+  DBPassword:
+    NoEcho: 'true'
+    Description: Password for MySQL database access
+    Type: String
+    MinLength: '8'
+    MaxLength: '41'
+    AllowedPattern: '[a-zA-Z0-9]*'
+    ConstraintDescription: must contain only alphanumeric characters.
+  VpcId:
+    Type: 'AWS::EC2::VPC::Id'
+    Description: VpcId of your existing Virtual Private Cloud (VPC)
+    ConstraintDescription: must be the VPC Id of an existing Virtual Private Cloud.
+  Subnets:
+    Type: 'List<AWS::EC2::Subnet::Id>'
+    Description: The list of SubnetIds in your Virtual Private Cloud (VPC)
+    ConstraintDescription: >-
+      must be a list of at least two existing subnets associated with at least
+      two different availability zones. They should be residing in the selected
+      Virtual Private Cloud.
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instances
+    Type: 'AWS::EC2::KeyPair::KeyName'
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+  WebServerCapacity:
+    Default: '2'
+    Description: The initial nuber of WebServer instances
+    Type: Number
+    MinValue: '1'
+    MaxValue: '5'
+    ConstraintDescription: must be between 1 and 5 EC2 instances.
+  InstanceType:
+    Description: WebServer EC2 instance type
+    Type: String
+    Default: t2.small
+    AllowedValues:
+      - t1.micro
+      - t2.nano
+      - t2.micro
+      - t2.small
+    ConstraintDescription: must be a valid EC2 instance type.
+  SSHLocation:
+    Description: ' The IP address range that can be used to SSH to the EC2 instances'
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 0.0.0.0/0
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+Mappings:
+  AWSInstanceType2Arch:
+    t1.micro:
+      Arch: PV64
+    t2.nano:
+      Arch: HVM64
+    t2.micro:
+      Arch: HVM64
+    t2.small:
+      Arch: HVM64
+  AWSRegionArch2AMI:
+    us-east-1:
+      PV64: ami-2a69aa47
+      HVM64: ami-97785bed
+      HVMG2: ami-0a6e3770
+    us-west-2:
+      PV64: ami-7f77b31f
+      HVM64: ami-f2d3638a
+      HVMG2: ami-ee15a196
+    us-west-1:
+      PV64: ami-a2490dc2
+      HVM64: ami-824c4ee2
+      HVMG2: ami-0da4a46d
+    eu-west-1:
+      PV64: ami-4cdd453f
+      HVM64: ami-d834aba1
+      HVMG2: ami-af8013d6
+    eu-west-2:
+      PV64: NOT_SUPPORTED
+      HVM64: ami-403e2524
+      HVMG2: NOT_SUPPORTED
+    eu-west-3:
+      PV64: NOT_SUPPORTED
+      HVM64: ami-8ee056f3
+      HVMG2: NOT_SUPPORTED
+    eu-central-1:
+      PV64: ami-6527cf0a
+      HVM64: ami-5652ce39
+      HVMG2: ami-1d58ca72
+    ap-northeast-1:
+      PV64: ami-3e42b65f
+      HVM64: ami-ceafcba8
+      HVMG2: ami-edfd658b
+    ap-northeast-2:
+      PV64: NOT_SUPPORTED
+      HVM64: ami-863090e8
+      HVMG2: NOT_SUPPORTED
+    ap-northeast-3:
+      PV64: NOT_SUPPORTED
+      HVM64: ami-83444afe
+      HVMG2: NOT_SUPPORTED
+    ap-southeast-1:
+      PV64: ami-df9e4cbc
+      HVM64: ami-68097514
+      HVMG2: ami-c06013bc
+    ap-southeast-2:
+      PV64: ami-63351d00
+      HVM64: ami-942dd1f6
+      HVMG2: ami-85ef12e7
+    ap-south-1:
+      PV64: NOT_SUPPORTED
+      HVM64: ami-531a4c3c
+      HVMG2: ami-411e492e
+    us-east-2:
+      PV64: NOT_SUPPORTED
+      HVM64: ami-f63b1193
+      HVMG2: NOT_SUPPORTED
+    ca-central-1:
+      PV64: NOT_SUPPORTED
+      HVM64: ami-a954d1cd
+      HVMG2: NOT_SUPPORTED
+    sa-east-1:
+      PV64: ami-1ad34676
+      HVM64: ami-84175ae8
+      HVMG2: NOT_SUPPORTED
+    cn-north-1:
+      PV64: ami-77559f1a
+      HVM64: ami-cb19c4a6
+      HVMG2: NOT_SUPPORTED
+    cn-northwest-1:
+      PV64: ami-80707be2
+      HVM64: ami-3e60745c
+      HVMG2: NOT_SUPPORTED
+Resources:
+  ApplicationLoadBalancer:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Properties:
+      Subnets: !Ref Subnets
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 7969a068-c9de-44d4-92fa-f588a533ff18
+  ALBListener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroup
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: '80'
+      Protocol: HTTP
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 301a6269-d5a5-4fc9-9794-2555059e6160
+  ALBTargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 5
+      VpcId: !Ref VpcId
+      TargetGroupAttributes:
+        - Key: stickiness.enabled
+          Value: 'true'
+        - Key: stickiness.type
+          Value: lb_cookie
+        - Key: stickiness.lb_cookie.duration_seconds
+          Value: '30'
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: d8ec784c-37dc-46cf-b38b-8e4a8655a2b1
+  WebServerGroup:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties:
+      VPCZoneIdentifier: !Ref Subnets
+      LaunchConfigurationName: !Ref LaunchConfig
+      MinSize: '1'
+      MaxSize: '5'
+      DesiredCapacity: !Ref WebServerCapacity
+      TargetGroupARNs:
+        - !Ref ALBTargetGroup
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT5M
+        Count: !Ref WebServerCapacity
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: '1'
+        MaxBatchSize: '1'
+        PauseTime: PT15M
+        WaitOnResourceSignals: 'true'
+  LaunchConfig:
+    Type: 'AWS::AutoScaling::LaunchConfiguration'
+    Metadata:
+      Comment1: Configure the bootstrap helpers to install the Apache Web Server and PHP
+      Comment2: >-
+        The website content is downloaded from the CloudFormationPHPSample.zip
+        file
+      'AWS::CloudFormation::Init':
+        config:
+          packages:
+            yum:
+              httpd: []
+              php: []
+              php-mysql: []
+          files:
+            /var/www/html/index.php:
+              content: !Join 
+                - ''
+                - - |
+                    <html>
+                  - |2
+                      <head>
+                  - |2
+                        <title>AWS CloudFormation PHP Sample</title>
+                  - |2
+                        <meta http-equiv="Content-Type" content="text/html; charset=ISO-8859-1">
+                  - |2
+                      </head>
+                  - |2
+                      <body>
+                  - |2
+                        <h1>Welcome to the AWS CloudFormation PHP Sample</h1>
+                  - |2
+                        <p/>
+                  - |2
+                        <?php
+                  - |2
+                          // Print out the current data and tie
+                  - |2
+                          print "The Current Date and Time is: <br/>";
+                  - |2
+                          print date("g:i A l, F j Y.");
+                  - |2
+                        ?>
+                  - |2
+                        <p/>
+                  - |2
+                        <?php
+                  - |2
+                          // Setup a handle for CURL
+                  - |2
+                          $curl_handle=curl_init();
+                  - |2
+                          curl_setopt($curl_handle,CURLOPT_CONNECTTIMEOUT,2);
+                  - |2
+                          curl_setopt($curl_handle,CURLOPT_RETURNTRANSFER,1);
+                  - |2
+                          // Get the hostname of the intance from the instance metadata
+                  - |2
+                          curl_setopt($curl_handle,CURLOPT_URL,'http://169.254.169.254/latest/meta-data/public-hostname');
+                  - |2
+                          $hostname = curl_exec($curl_handle);
+                  - |2
+                          if (empty($hostname))
+                  - |2
+                          {
+                  - |2
+                            print "Sorry, for some reason, we got no hostname back <br />";
+                  - |2
+                          }
+                  - |2
+                          else
+                  - |2
+                          {
+                  - |2
+                            print "Server = " . $hostname . "<br />";
+                  - |2
+                          }
+                  - |2
+                          // Get the instance-id of the intance from the instance metadata
+                  - |2
+                          curl_setopt($curl_handle,CURLOPT_URL,'http://169.254.169.254/latest/meta-data/instance-id');
+                  - |2
+                          $instanceid = curl_exec($curl_handle);
+                  - |2
+                          if (empty($instanceid))
+                  - |2
+                          {
+                  - |2
+                            print "Sorry, for some reason, we got no instance id back <br />";
+                  - |2
+                          }
+                  - |2
+                          else
+                  - |2
+                          {
+                  - |2
+                            print "EC2 instance-id = " . $instanceid . "<br />";
+                  - |2
+                          }
+                  - '      $Database   = "'
+                  - !Ref DBEndpoint
+                  - |
+                    ";
+                  - '      $DBUser     = "'
+                  - !Ref DBUser
+                  - |
+                    ";
+                  - '      $DBPassword = "'
+                  - !Ref DBPassword
+                  - |
+                    ";
+                  - |2
+                          print "Database = " . $Database . "<br />";
+                  - |2
+                          $dbconnection = mysql_connect($Database, $DBUser, $DBPassword)
+                  - |2
+                                          or die("Could not connect: " . mysql_error());
+                  - |2
+                          print ("Connected to $Database successfully");
+                  - |2
+                          mysql_close($dbconnection);
+                  - |2
+                        ?>
+                  - |2
+                        <h2>PHP Information</h2>
+                  - |2
+                        <p/>
+                  - |2
+                        <?php
+                  - |2
+                          phpinfo();
+                  - |2
+                        ?>
+                  - |2
+                      </body>
+                  - |
+                    </html>
+              mode: '000600'
+              owner: apache
+              group: apache
+            /etc/cfn/cfn-hup.conf:
+              content: !Join 
+                - ''
+                - - |
+                    [main]
+                  - stack=
+                  - !Ref 'AWS::StackId'
+                  - |+
+
+                  - region=
+                  - !Ref 'AWS::Region'
+                  - |+
+
+              mode: '000400'
+              owner: root
+              group: root
+            /etc/cfn/hooks.d/cfn-auto-reloader.conf:
+              content: !Join 
+                - ''
+                - - |
+                    [cfn-auto-reloader-hook]
+                  - |
+                    triggers=post.update
+                  - >
+                    path=Resources.LaunchConfig.Metadata.AWS::CloudFormation::Init
+                  - 'action=/opt/aws/bin/cfn-init -v '
+                  - '         --stack '
+                  - !Ref 'AWS::StackName'
+                  - '         --resource LaunchConfig '
+                  - '         --region '
+                  - !Ref 'AWS::Region'
+                  - |+
+
+                  - |
+                    runas=root
+              mode: '000400'
+              owner: root
+              group: root
+          services:
+            sysvinit:
+              httpd:
+                enabled: 'true'
+                ensureRunning: 'true'
+              cfn-hup:
+                enabled: 'true'
+                ensureRunning: 'true'
+                files:
+                  - /etc/cfn/cfn-hup.conf
+                  - /etc/cfn/hooks.d/cfn-auto-reloader.conf
+      'AWS::CloudFormation::Designer':
+        id: b207fce7-3381-4f84-80e9-ba7b56337a9e
+    Properties:
+      ImageId: !FindInMap 
+        - AWSRegionArch2AMI
+        - !Ref 'AWS::Region'
+        - !FindInMap 
+          - AWSInstanceType2Arch
+          - !Ref InstanceType
+          - Arch
+      InstanceType: !Ref InstanceType
+      SecurityGroups:
+        - !Ref WebServerSecurityGroup
+      KeyName: !Ref KeyName
+      UserData: !Base64 
+        'Fn::Join':
+          - ''
+          - - |
+              #!/bin/bash -xe
+            - |
+              yum update -y aws-cfn-bootstrap
+            - |
+              # Install the files and packages from the metadata
+            - '/opt/aws/bin/cfn-init -v '
+            - '         --stack '
+            - !Ref 'AWS::StackName'
+            - '         --resource LaunchConfig '
+            - '         --region '
+            - !Ref 'AWS::Region'
+            - |+
+
+            - |
+              # Signal the status from cfn-init
+            - '/opt/aws/bin/cfn-signal -e $? '
+            - '         --stack '
+            - !Ref 'AWS::StackName'
+            - '         --resource WebServerGroup '
+            - '         --region '
+            - !Ref 'AWS::Region'
+            - |+
+
+  WebServerSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Enable HTTP access via port 80 locked down to the ELB and SSH access
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          SourceSecurityGroupId: !Select 
+            - 0
+            - !GetAtt 
+              - ApplicationLoadBalancer
+              - SecurityGroups
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: !Ref SSHLocation
+      VpcId: !Ref VpcId
