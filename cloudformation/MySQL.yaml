@@ -75,7 +75,6 @@ Resources:
           MasterUserPassword: !Ref DBPassword
           DBInstanceClass: !Ref DBInstanceClass
           AllocatedStorage: !Ref DBAllocatedStorage
-          VpcID: !Ref myVPC
           VPCSecurityGroups:
             - !GetAtt 
               - DBEC2SecurityGroup
