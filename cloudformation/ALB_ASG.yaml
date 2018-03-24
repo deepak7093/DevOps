@@ -465,3 +465,6 @@ Outputs:
   ASGNAME:
     Description: AutoScaling group name
     Value: !Ref WebServerGroup
+  ALBENDPOINT:
+    Description: Application Load Balancer Endpoint
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
