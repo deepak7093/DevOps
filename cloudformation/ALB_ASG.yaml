@@ -463,5 +463,5 @@ Resources:
       VpcId: !Ref VpcId
 Outputs:
   ASGNAME:
-  Description: AutoScaling group name
-  Value: !Ref WebServerGroup
+    Description: AutoScaling group name
+    Value: !Ref WebServerGroup
