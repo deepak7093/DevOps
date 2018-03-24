@@ -461,3 +461,7 @@ Resources:
           ToPort: '22'
           CidrIp: !Ref SSHLocation
       VpcId: !Ref VpcId
+Outputs:
+  ASGNAME:
+  Description: AutoScaling group name
+  Value: !Ref WebServerGroup
