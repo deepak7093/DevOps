@@ -79,3 +79,8 @@ Resources:
             - !GetAtt 
               - DBEC2SecurityGroup
               - GroupId
+Outputs:
+  DBEndpoint:
+    Description: RDS Endpoint URL
+    Value: !GetAtt MySQLDatabase.Endpoint.Address
+
